@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 # These need not be changed. FPS can be changed to slow down or speed up visualization for further inspection.
 
-FPS = 25  # FPS of output video, in principle should correspond to FPS of input video
+FPS = 10  # FPS of output video, in principle should correspond to FPS of input video
 # Can be modified during experimentation
 VIDEO_SHAPE = (2160, 3840)  # original video shape in format (H, W)
 IM_SRC = os.path.join(os.path.dirname(__file__), "smoothing",
@@ -48,7 +48,7 @@ def hex_to_rgb(hex_tuple):
 
 def run_tactical_module(df_tactical, root, video_shape, fps):
     """
-    Run tactical visualization based on processed input 
+    Run tactical visualization based on processed input
     """
     parameters = {
         "SIZE_PLAYER": 8,
@@ -95,21 +95,24 @@ class ModuleTacticalBase(object):
         # gather team color dicts
         print("Done")
         print("Start visualization for " + parameters.get("sequence"))
-        for i in tqdm(range(len(df.frame_num.unique()))):
+
+        height, width, _ = im_src.shape
+        size = (width, height)
+        if save_video:
+            out = cv2.VideoWriter(
+                os.path.join(self.root, "video_tactical.mp4"),
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                parameters.get("fps"),
+                size,
+            )
+        for i in tqdm(range(100, 950)):
+            # for i in tqdm(range(len(df.frame_num.unique()))):
             image = im_src.copy()
-            if i == 0:
-                height, width, layers = image.shape
-                size = (width, height)
-                if save_video:
-                    out = cv2.VideoWriter(
-                        os.path.join(self.root, "video_tactical.mp4"),
-                        cv2.VideoWriter_fourcc(*"mp4v"),
-                        parameters.get("fps"),
-                        size,
-                    )
-            df_tmp_players = df_players.loc[df_players["frame_num"] == i][
+
+            df_tmp_players = df_players.loc[(df_players["frame_num"] == i) & (df_players["track_id"] == 9.0)][
                 ["xh", "yh", "team"]
             ].values.reshape(-1, 1, 3)
+
             df_tmp_goalkeeper = df_goalkeeper.loc[df_goalkeeper["frame_num"] == i][
                 ["xh", "yh"]
             ].values.reshape(-1, 1, 2)
@@ -135,39 +138,48 @@ class ModuleTacticalBase(object):
                     self.team_color_dict.get(df_tmp_players[player, 0, 2]),
                     -1,
                 )
-            for ball in range(len(df_tmp_ball)):
-                cv2.circle(
-                    image,
-                    (
-                        df_tmp_ball[ball, 0, 0].astype(int),
-                        df_tmp_ball[ball, 0, 1].astype(int),
-                    ),
-                    parameters.get("SIZE_BALL"),
-                    colors.get("ball"),
-                    -1,
-                )
-            for goalkeeper in range(len(df_tmp_goalkeeper)):
-                cv2.circle(
-                    image,
-                    (
-                        df_tmp_goalkeeper[goalkeeper, 0, 0].astype(int),
-                        df_tmp_goalkeeper[goalkeeper, 0, 1].astype(int),
-                    ),
-                    parameters.get("SIZE_PLAYER"),
-                    colors.get("goalkeeper"),
-                    -1,
-                )
-            for referee in range(len(df_tmp_referee)):
-                cv2.circle(
-                    image,
-                    (
-                        df_tmp_referee[referee, 0, 0].astype(int),
-                        df_tmp_referee[referee, 0, 1].astype(int),
-                    ),
-                    parameters.get("SIZE_PLAYER"),
-                    colors.get("referee"),
-                    -1,
-                )
+            # for ball in range(len(df_tmp_ball)):
+            #     cv2.circle(
+            #         image,
+            #         (
+            #             df_tmp_ball[ball, 0, 0].astype(int),
+            #             df_tmp_ball[ball, 0, 1].astype(int),
+            #         ),
+            #         parameters.get("SIZE_BALL"),
+            #         colors.get("ball"),
+            #         -1,
+            #     )
+            # for goalkeeper in range(len(df_tmp_goalkeeper)):
+            #     cv2.circle(
+            #         image,
+            #         (
+            #             df_tmp_goalkeeper[goalkeeper, 0, 0].astype(int),
+            #             df_tmp_goalkeeper[goalkeeper, 0, 1].astype(int),
+            #         ),
+            #         parameters.get("SIZE_PLAYER"),
+            #         colors.get("goalkeeper"),
+            #         -1,
+            #     )
+            # for referee in range(len(df_tmp_referee)):
+            #     cv2.circle(
+            #         image,
+            #         (
+            #             df_tmp_referee[referee, 0, 0].astype(int),
+            #             df_tmp_referee[referee, 0, 1].astype(int),
+            #         ),
+            #         parameters.get("SIZE_PLAYER"),
+            #         colors.get("referee"),
+            #         -1,
+            #     )
+
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            org = (50, 50)
+            fontScale = 1
+            blue_color = (255, 0, 0)
+            thickness = 2
+            image = cv2.putText(image, f'Frame %d' % i, org, font,
+                                fontScale, blue_color, thickness, cv2.LINE_AA)
+
             if save_video:
                 out.write(image)
         out.release()
@@ -176,14 +188,19 @@ class ModuleTacticalBase(object):
 
 
 # DATA PREPARATOR class
-# This one should be modified to improve tactical mapping quality. Smoothing logic can be applied in the apply_homography method. This is the part, where image coordinates are mapped onto the pitch plane.
+# This one should be modified to improve tactical mapping quality. Smoothing logic can be applied in the apply_homography method.
+# This is the part, where image coordinates are mapped onto the pitch plane.
 
 # Currently, the mapping is done in the most basic manner.
 
-# Mapping logic: 1. xc_ corresponds to the center of gravity for each person in the X-axis, here it is the middle coordinate 2. yc_ corresponds to the maximum coordinate on the Y-axis in the image space, which corresponds to the feet of the player
+# Mapping logic:
+# 1. xc_ corresponds to the center of gravity for each person in the X-axis, here it is the middle coordinate
+# 2. yc_ corresponds to the maximum coordinate on the Y-axis in the image space, which corresponds to the feet of the player
 
 # Smoothing approaches
-# Two ways of smoothing can be used: 1. apply smoothing on the raw image coordinates: (x0, y0, x1, y1) 2. apply smoothing on the coordinates after mapping onto the pitch plane: (xh, yh)
+# Two ways of smoothing can be used:
+# 1. apply smoothing on the raw image coordinates: (x0, y0, x1, y1)
+# 2. apply smoothing on the coordinates after mapping onto the pitch plane: (xh, yh)
 
 
 class DataPreparator(object):
@@ -208,7 +225,9 @@ class DataPreparator(object):
         df_merged = df_detection.merge(
             df_homography, on=["file_name"], how="inner")
         df_merged["frame_num"] = pd.factorize(df_merged["file_name"])[0]
-        return df_merged
+        df_merged["track_id"] = df_merged["track_id"].dropna().astype(
+            "int", errors="ignore")
+        return self.subset_input(df_merged)
 
     def apply_homography(self, df_merged, shape):
         """
@@ -222,9 +241,34 @@ class DataPreparator(object):
         # df_smoothed = ...
         df_merged["xc_"] = (df_merged["x0"] + df_merged["x1"]) / 2
         df_merged["yc_"] = df_merged["y1"]
+        df_merged["bb_height"] = df_merged["y1"] - df_merged["y0"]
+
+        # print(df_merged.groupby(by=["track_id"])["bb_height"].std())
+        # df_merged[((df_merged["bb_height"] - df_merged["bb_height"].mean()
+        #             ) / df_merged["bb_height"].std()).abs() < 3]
+
+        window_size = 25
+
+        for track_id in df_merged["track_id"].dropna().unique():
+            df_track = df_merged.loc[df_merged["track_id"]
+                                     == track_id, ["frame_num", "bb_height"]]
+            median = df_track["bb_height"].rolling(
+                window_size, min_periods=1).median()
+            df_merged.loc[df_merged["track_id"]
+                          == track_id, "median_bb_height"] = median
+
+        df_merged["median_bb_height"].fillna(
+            df_merged["bb_height"], inplace=True)
+        df_merged["yc_smoothed"] = df_merged["y0"] + \
+            df_merged["median_bb_height"]
+
+# 5,5,5,5,5,7,4,599,6
+        # for i in tqdm(range(len(df.frame_num.unique()))):
+
         # scaling the coordinates to 640x320 (this is due to the model output resolutions)
         df_merged["xc"] = df_merged["xc_"] * 640 / shape[1]
-        df_merged["yc"] = df_merged["yc_"] * 320 / shape[0]
+        df_merged["yc"] = df_merged["yc_smoothed"] * 320 / shape[0]
+        assert (np.sum(pd.isnull(df_merged["yc"]))) == 0
         # apply homography
         df_merged["xh"] = (
             df_merged["h0"] * df_merged["xc"]
@@ -253,7 +297,36 @@ class DataPreparator(object):
         # return smoothed DF
         # return df_smoothed
 
-    def subset_columns(self, df_merged):
+    def subset_input(self, df):
+        """
+        Subset columns for visualization preparation
+        """
+        df = df.loc[
+            :,
+            [
+                "frame_num",
+                "x0",
+                "x1",
+                "y0",
+                "y1",
+                "category",
+                "team",
+                "number",
+                "track_id",
+                "h0",
+                "h1",
+                "h2",
+                "h3",
+                "h4",
+                "h5",
+                "h6",
+                "h7",
+                "h8",
+            ],
+        ]
+        return df
+
+    def subset_output(self, df_merged):
         """
         Subset columns for visualization preparation
         """
@@ -266,7 +339,6 @@ class DataPreparator(object):
                 "category",
                 "team",
                 "number",
-                "number_score",
                 "track_id",
             ],
         ]
@@ -283,6 +355,7 @@ preparator = DataPreparator()
 df_merged = preparator.initial_prep(df_det, df_hom)
 df_merged.to_csv("df_merged.csv")
 df_merged_hom = preparator.apply_homography(df_merged, VIDEO_SHAPE)
-df_tactical = preparator.subset_columns(df_merged_hom)
+df_merged_hom.to_csv("df_merged_hom.csv")
+df_tactical = preparator.subset_output(df_merged_hom)
 
 run_tactical_module(df_tactical, ROOT_DST, VIDEO_SHAPE, FPS)
