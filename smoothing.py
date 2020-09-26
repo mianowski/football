@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 # These need not be changed. FPS can be changed to slow down or speed up visualization for further inspection.
 
-FPS = 10  # FPS of output video, in principle should correspond to FPS of input video
+FPS = 25  # FPS of output video, in principle should correspond to FPS of input video
 # Can be modified during experimentation
 VIDEO_SHAPE = (2160, 3840)  # original video shape in format (H, W)
 IM_SRC = os.path.join(os.path.dirname(__file__), "smoothing",
@@ -105,11 +105,11 @@ class ModuleTacticalBase(object):
                 parameters.get("fps"),
                 size,
             )
-        for i in tqdm(range(100, 950)):
-            # for i in tqdm(range(len(df.frame_num.unique()))):
+
+        for i in tqdm(range(len(df.frame_num.unique()))):
             image = im_src.copy()
 
-            df_tmp_players = df_players.loc[(df_players["frame_num"] == i) & (df_players["track_id"] == 9.0)][
+            df_tmp_players = df_players.loc[(df_players["frame_num"] == i)][
                 ["xh", "yh", "team"]
             ].values.reshape(-1, 1, 3)
 
@@ -138,39 +138,39 @@ class ModuleTacticalBase(object):
                     self.team_color_dict.get(df_tmp_players[player, 0, 2]),
                     -1,
                 )
-            # for ball in range(len(df_tmp_ball)):
-            #     cv2.circle(
-            #         image,
-            #         (
-            #             df_tmp_ball[ball, 0, 0].astype(int),
-            #             df_tmp_ball[ball, 0, 1].astype(int),
-            #         ),
-            #         parameters.get("SIZE_BALL"),
-            #         colors.get("ball"),
-            #         -1,
-            #     )
-            # for goalkeeper in range(len(df_tmp_goalkeeper)):
-            #     cv2.circle(
-            #         image,
-            #         (
-            #             df_tmp_goalkeeper[goalkeeper, 0, 0].astype(int),
-            #             df_tmp_goalkeeper[goalkeeper, 0, 1].astype(int),
-            #         ),
-            #         parameters.get("SIZE_PLAYER"),
-            #         colors.get("goalkeeper"),
-            #         -1,
-            #     )
-            # for referee in range(len(df_tmp_referee)):
-            #     cv2.circle(
-            #         image,
-            #         (
-            #             df_tmp_referee[referee, 0, 0].astype(int),
-            #             df_tmp_referee[referee, 0, 1].astype(int),
-            #         ),
-            #         parameters.get("SIZE_PLAYER"),
-            #         colors.get("referee"),
-            #         -1,
-            #     )
+            for ball in range(len(df_tmp_ball)):
+                cv2.circle(
+                    image,
+                    (
+                        df_tmp_ball[ball, 0, 0].astype(int),
+                        df_tmp_ball[ball, 0, 1].astype(int),
+                    ),
+                    parameters.get("SIZE_BALL"),
+                    colors.get("ball"),
+                    -1,
+                )
+            for goalkeeper in range(len(df_tmp_goalkeeper)):
+                cv2.circle(
+                    image,
+                    (
+                        df_tmp_goalkeeper[goalkeeper, 0, 0].astype(int),
+                        df_tmp_goalkeeper[goalkeeper, 0, 1].astype(int),
+                    ),
+                    parameters.get("SIZE_PLAYER"),
+                    colors.get("goalkeeper"),
+                    -1,
+                )
+            for referee in range(len(df_tmp_referee)):
+                cv2.circle(
+                    image,
+                    (
+                        df_tmp_referee[referee, 0, 0].astype(int),
+                        df_tmp_referee[referee, 0, 1].astype(int),
+                    ),
+                    parameters.get("SIZE_PLAYER"),
+                    colors.get("referee"),
+                    -1,
+                )
 
             font = cv2.FONT_HERSHEY_SIMPLEX
             org = (50, 50)
