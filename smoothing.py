@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 # These need not be changed. FPS can be changed to slow down or speed up visualization for further inspection.
 
-FPS = 25  # FPS of output video, in principle should correspond to FPS of input video
+FPS = 5  # FPS of output video, in principle should correspond to FPS of input video
 # Can be modified during experimentation
 VIDEO_SHAPE = (2160, 3840)  # original video shape in format (H, W)
 IM_SRC = os.path.join(os.path.dirname(__file__), "smoothing",
@@ -106,12 +106,13 @@ class ModuleTacticalBase(object):
                 size,
             )
 
-        for i in tqdm(df.frame_num.unique()):
+        for i in tqdm(range(610, 650)):
+            # for i in tqdm(df.frame_num.unique()):
             image = im_src.copy()
 
             df_tmp_players = df_players.loc[(df_players["frame_num"] == i)][
-                ["xh", "yh", "team"]
-            ].values.reshape(-1, 1, 3)
+                ["xh", "yh", "team", "track_id"]
+            ].values.reshape(-1, 1, 4)
 
             df_tmp_goalkeeper = df_goalkeeper.loc[df_goalkeeper["frame_num"] == i][
                 ["xh", "yh"]
@@ -128,16 +129,26 @@ class ModuleTacticalBase(object):
                     team_color = "red"
                 else:
                     team_color = "blue"
+
+                player_loc = (
+                    df_tmp_players[player, 0, 0].astype(int),
+                    df_tmp_players[player, 0, 1].astype(int),
+                )
                 cv2.circle(
                     image,
-                    (
-                        df_tmp_players[player, 0, 0].astype(int),
-                        df_tmp_players[player, 0, 1].astype(int),
-                    ),
+                    player_loc,
                     parameters.get("SIZE_PLAYER"),
                     self.team_color_dict.get(df_tmp_players[player, 0, 2]),
                     -1,
                 )
+                font = cv2.FONT_HERSHEY_SIMPLEX
+
+                fontScale = 0.5
+                blue_color = (255, 0, 0)
+                thickness = 1
+                text = str(df_tmp_players[player, 0, 3].astype(int))
+                cv2.putText(image, text, player_loc, font,
+                            fontScale, blue_color, thickness, cv2.LINE_AA)
             for ball in range(len(df_tmp_ball)):
                 cv2.circle(
                     image,
@@ -177,8 +188,8 @@ class ModuleTacticalBase(object):
             fontScale = 1
             blue_color = (255, 0, 0)
             thickness = 2
-            image = cv2.putText(image, f'Frame %d' % i, org, font,
-                                fontScale, blue_color, thickness, cv2.LINE_AA)
+            cv2.putText(image, f'Frame %d' % i, org, font,
+                        fontScale, blue_color, thickness, cv2.LINE_AA)
 
             if save_video:
                 out.write(image)
@@ -229,14 +240,25 @@ class DataPreparator(object):
             "int", errors="ignore")
         return self.subset_input(df_merged)
 
+    def interpolate_missing_frames(self, df_merged):
+        for track_id in df_merged["track_id"].dropna().unique():
+            df_track = df_merged.loc[df_merged["track_id"]
+                                     == track_id, :]
+            min_frame = df_track["frame_num"].min()
+            max_frame = df_track["frame_num"].max()
+            for frame in range(min_frame, max_frame + 1):
+                if df_track.loc[df_track["frame_num"] == frame, :].empty:
+                    print(f"Empty frame %d for id %d" % (frame, track_id))
+        return df_merged
+
     def correct_feet_occlusion(self, df_merged, window_size: int = 25):
         for track_id in df_merged["track_id"].dropna().unique():
             df_track = df_merged.loc[df_merged["track_id"]
-                                     == track_id, ["frame_num", "bb_height"]]
-            median = df_track["bb_height"].rolling(
-                window_size, min_periods=1).median()
+                                     == track_id, :]
+
             df_merged.loc[df_merged["track_id"]
-                          == track_id, "median_bb_height"] = median
+                          == track_id, "median_bb_height"] = df_track["bb_height"].rolling(
+                window_size, min_periods=1).median()
 
         df_merged["median_bb_height"].fillna(
             df_merged["bb_height"], inplace=True)
@@ -244,16 +266,7 @@ class DataPreparator(object):
             df_merged["median_bb_height"]
         return df_merged
 
-    def apply_homography(self, df_merged, shape):
-        """
-        Apply homography.
-        TODO: Create smoothing methods here.
-        """
-        df_merged = df_merged.copy()
-        # coordinates, according to which the mapping onto the pitch plane will happen
-        # first way of smoothing can be applied here:
-        # try applying smoothing methods to (x0, y0, x1, y1)
-        # df_smoothed = ...
+    def prepare_points_for_homography(self, df_merged, shape):
         df_merged["xc_"] = (df_merged["x0"] + df_merged["x1"]) / 2
         df_merged["yc_"] = df_merged["y1"]
         df_merged["bb_height"] = df_merged["y1"] - df_merged["y0"]
@@ -263,7 +276,10 @@ class DataPreparator(object):
         df_merged["xc"] = df_merged["xc_"] * 640 / shape[1]
         df_merged["yc"] = df_merged["yc_smoothed"] * 320 / shape[0]
         assert (np.sum(pd.isnull(df_merged["yc"]))) == 0
-        # apply homography
+        return df_merged
+
+    def apply_homography(self, df_merged):
+
         df_merged["xh"] = (
             df_merged["h0"] * df_merged["xc"]
             + df_merged["h1"] * df_merged["yc"]
@@ -347,8 +363,16 @@ df_hom = pd.read_csv(os.path.join(ROOT_SRC, "hom_smooth.csv"))
 
 preparator = DataPreparator()
 df_merged = preparator.initial_prep(df_det, df_hom)
+df_merged = preparator.interpolate_missing_frames(df_merged)
 df_merged.to_csv("df_merged.csv")
-df_merged_hom = preparator.apply_homography(df_merged, VIDEO_SHAPE)
+
+df_merged = df_merged.copy()
+# coordinates, according to which the mapping onto the pitch plane will happen
+# first way of smoothing can be applied here:
+# try applying smoothing methods to (x0, y0, x1, y1)
+
+df_smoothed = preparator.prepare_points_for_homography(df_merged, VIDEO_SHAPE)
+df_merged_hom = preparator.apply_homography(df_smoothed)
 df_merged_hom.to_csv("df_merged_hom.csv")
 df_tactical = preparator.subset_output(df_merged_hom)
 
