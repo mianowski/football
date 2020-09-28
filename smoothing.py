@@ -106,7 +106,7 @@ class ModuleTacticalBase(object):
                 size,
             )
 
-        for i in tqdm(range(len(df.frame_num.unique()))):
+        for i in tqdm(df.frame_num.unique()):
             image = im_src.copy()
 
             df_tmp_players = df_players.loc[(df_players["frame_num"] == i)][
