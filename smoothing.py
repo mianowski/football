@@ -229,6 +229,21 @@ class DataPreparator(object):
             "int", errors="ignore")
         return self.subset_input(df_merged)
 
+    def correct_feet_occlusion(self, df_merged, window_size: int = 25):
+        for track_id in df_merged["track_id"].dropna().unique():
+            df_track = df_merged.loc[df_merged["track_id"]
+                                     == track_id, ["frame_num", "bb_height"]]
+            median = df_track["bb_height"].rolling(
+                window_size, min_periods=1).median()
+            df_merged.loc[df_merged["track_id"]
+                          == track_id, "median_bb_height"] = median
+
+        df_merged["median_bb_height"].fillna(
+            df_merged["bb_height"], inplace=True)
+        df_merged["yc_smoothed"] = df_merged["y0"] + \
+            df_merged["median_bb_height"]
+        return df_merged
+
     def apply_homography(self, df_merged, shape):
         """
         Apply homography.
@@ -243,28 +258,7 @@ class DataPreparator(object):
         df_merged["yc_"] = df_merged["y1"]
         df_merged["bb_height"] = df_merged["y1"] - df_merged["y0"]
 
-        # print(df_merged.groupby(by=["track_id"])["bb_height"].std())
-        # df_merged[((df_merged["bb_height"] - df_merged["bb_height"].mean()
-        #             ) / df_merged["bb_height"].std()).abs() < 3]
-
-        window_size = 25
-
-        for track_id in df_merged["track_id"].dropna().unique():
-            df_track = df_merged.loc[df_merged["track_id"]
-                                     == track_id, ["frame_num", "bb_height"]]
-            median = df_track["bb_height"].rolling(
-                window_size, min_periods=1).median()
-            df_merged.loc[df_merged["track_id"]
-                          == track_id, "median_bb_height"] = median
-
-        df_merged["median_bb_height"].fillna(
-            df_merged["bb_height"], inplace=True)
-        df_merged["yc_smoothed"] = df_merged["y0"] + \
-            df_merged["median_bb_height"]
-
-# 5,5,5,5,5,7,4,599,6
-        # for i in tqdm(range(len(df.frame_num.unique()))):
-
+        df_merged = self.correct_feet_occlusion(df_merged)
         # scaling the coordinates to 640x320 (this is due to the model output resolutions)
         df_merged["xc"] = df_merged["xc_"] * 640 / shape[1]
         df_merged["yc"] = df_merged["yc_smoothed"] * 320 / shape[0]
