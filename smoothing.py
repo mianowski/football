@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 # These need not be changed. FPS can be changed to slow down or speed up visualization for further inspection.
 FPS_INPUT = 29.97
-FPS = 10  # FPS of output video, in principle should correspond to FPS of input video
+FPS = FPS_INPUT  # FPS of output video, in principle should correspond to FPS of input video
 # Can be modified during experimentation
 VIDEO_SHAPE = (2160, 3840)  # original video shape in format (H, W)
 IM_SRC = os.path.join(os.path.dirname(__file__), "smoothing",
@@ -110,8 +110,8 @@ class ModuleTacticalBase(object):
             image = im_src.copy()
 
             df_tmp_players = df_players.loc[(df_players["frame_num"] == i)][
-                ["xh", "yh", "team", "track_id"]
-            ].values.reshape(-1, 1, 4)
+                ["xh", "yh", "team", "track_id", "speed"]
+            ].values.reshape(-1, 1, 5)
 
             df_tmp_goalkeeper = df_goalkeeper.loc[df_goalkeeper["frame_num"] == i][
                 ["xh", "yh"]
@@ -145,7 +145,8 @@ class ModuleTacticalBase(object):
                 fontScale = 0.5
                 blue_color = (255, 0, 0)
                 thickness = 1
-                text = str(df_tmp_players[player, 0, 3].astype(int))
+                text = f"%d, speed: %s" % (df_tmp_players[player, 0, 3].astype(
+                    int), "~"*(df_tmp_players[player, 0, 4].astype(int)//10))
                 cv2.putText(image, text, player_loc, font,
                             fontScale, blue_color, thickness, cv2.LINE_AA)
             for ball in range(len(df_tmp_ball)):
@@ -280,6 +281,11 @@ class DataPreparator(object):
             alpha=alpha).mean()
         return df_track
 
+    def add_speed(self, df_track):
+        df_track["speed"] = FPS_INPUT*((df_track["xc_smoothed"].diff() * 640 / VIDEO_SHAPE[1]).pow(
+            2) + (df_track["xc_smoothed"].diff() * 320 / VIDEO_SHAPE[0]).pow(2)).pow(.5).fillna(0)
+        return df_track
+
     def smooth_tracks(self, df_merged):
         tracks_dfs = [df_merged.loc[df_merged["track_id"]
                                     == np.NaN, :]]
@@ -291,6 +297,7 @@ class DataPreparator(object):
             df_track = self.interpolate_missing_frames(df_track)
             df_track = self.ewm(df_track)
 
+            df_track = self.add_speed(df_track)
             tracks_dfs.append(df_track)
 
         return pd.concat(tracks_dfs, ignore_index=True, sort=False)
@@ -375,6 +382,7 @@ class DataPreparator(object):
                 "team",
                 "number",
                 "track_id",
+                "speed",
             ],
         ]
         return df
