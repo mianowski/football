@@ -17,8 +17,8 @@ from tqdm import tqdm
 # ### GLOBAL PARAMETERS
 
 # These need not be changed. FPS can be changed to slow down or speed up visualization for further inspection.
-
-FPS = 5  # FPS of output video, in principle should correspond to FPS of input video
+FPS_INPUT = 29.97
+FPS = 10  # FPS of output video, in principle should correspond to FPS of input video
 # Can be modified during experimentation
 VIDEO_SHAPE = (2160, 3840)  # original video shape in format (H, W)
 IM_SRC = os.path.join(os.path.dirname(__file__), "smoothing",
@@ -241,17 +241,40 @@ class DataPreparator(object):
         return self.subset_input(df_merged)
 
     def interpolate_missing_frames(self, df_merged):
+        tracks_dfs = [df_merged.loc[df_merged["track_id"]
+                                    == np.NaN, :]]
         for track_id in df_merged["track_id"].dropna().unique():
             df_track = df_merged.loc[df_merged["track_id"]
                                      == track_id, :]
+            category = df_track.iloc[0]["category"]
             min_frame = df_track["frame_num"].min()
             max_frame = df_track["frame_num"].max()
-            for frame in range(min_frame, max_frame + 1):
+            for frame in range(min_frame, max_frame):
                 if df_track.loc[df_track["frame_num"] == frame, :].empty:
-                    print(f"Empty frame %d for id %d" % (frame, track_id))
-        return df_merged
+                    df_track = df_track.append(
+                        {"frame_num": frame, "track_id": track_id, "category": category}, ignore_index=True)
 
-    def correct_feet_occlusion(self, df_merged, window_size: int = 25):
+            # if(track_id == 9.0):
+            #     # print(df_track.xs((9.0, 627), level=('track_id', 'frame_num')))
+            #     print(df_track.loc[df_track["frame_num"] == 627])
+
+            df_track = df_track.sort_values(
+                "frame_num", ignore_index=True)
+            #     # print(df_track.xs((9.0, 627), level=('track_id', 'frame_num')))
+            #     print(df_track.loc[df_track["frame_num"] == 627])
+            df_track = df_track.interpolate()
+            # if(track_id == 9.0):
+            #     # print(df_track.xs((9.0, 627), level=('track_id', 'frame_num')))
+            #     print(df_track.loc[df_track["frame_num"] == 627])
+            tracks_dfs.append(df_track)
+
+            if(track_id == 9.0):
+                df_track.to_csv('9.csv', na_rep='NULL')
+                # print(df_track.loc[df_track["frame_num"] == 627])
+
+        return pd.concat(tracks_dfs, ignore_index=True, sort=False)
+
+    def correct_feet_occlusion(self, df_merged, window_size: int = int(FPS_INPUT)):
         for track_id in df_merged["track_id"].dropna().unique():
             df_track = df_merged.loc[df_merged["track_id"]
                                      == track_id, :]
@@ -259,8 +282,13 @@ class DataPreparator(object):
             df_merged.loc[df_merged["track_id"]
                           == track_id, "median_bb_height"] = df_track["bb_height"].rolling(
                 window_size, min_periods=1).median()
+            df_merged.loc[df_merged["track_id"]
+                          == track_id, "max_bb_height"] = df_track["bb_height"].rolling(
+                window_size, min_periods=1).median()
 
         df_merged["median_bb_height"].fillna(
+            df_merged["bb_height"], inplace=True)
+        df_merged["max_bb_height"].fillna(
             df_merged["bb_height"], inplace=True)
         df_merged["yc_smoothed"] = df_merged["y0"] + \
             df_merged["median_bb_height"]
@@ -273,6 +301,7 @@ class DataPreparator(object):
 
         df_merged = self.correct_feet_occlusion(df_merged)
         # scaling the coordinates to 640x320 (this is due to the model output resolutions)
+        df_merged.to_csv('prepare.csv')
         df_merged["xc"] = df_merged["xc_"] * 640 / shape[1]
         df_merged["yc"] = df_merged["yc_smoothed"] * 320 / shape[0]
         assert (np.sum(pd.isnull(df_merged["yc"]))) == 0
@@ -363,16 +392,17 @@ df_hom = pd.read_csv(os.path.join(ROOT_SRC, "hom_smooth.csv"))
 
 preparator = DataPreparator()
 df_merged = preparator.initial_prep(df_det, df_hom)
-df_merged = preparator.interpolate_missing_frames(df_merged)
 df_merged.to_csv("df_merged.csv")
 
-df_merged = df_merged.copy()
+
 # coordinates, according to which the mapping onto the pitch plane will happen
 # first way of smoothing can be applied here:
 # try applying smoothing methods to (x0, y0, x1, y1)
 
-df_smoothed = preparator.prepare_points_for_homography(df_merged, VIDEO_SHAPE)
-df_merged_hom = preparator.apply_homography(df_smoothed)
+df_merged = preparator.prepare_points_for_homography(df_merged, VIDEO_SHAPE)
+df_merged = preparator.interpolate_missing_frames(df_merged)
+df_merged.to_csv("df_interpolated.csv")
+df_merged_hom = preparator.apply_homography(df_merged)
 df_merged_hom.to_csv("df_merged_hom.csv")
 df_tactical = preparator.subset_output(df_merged_hom)
 
