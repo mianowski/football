@@ -106,8 +106,7 @@ class ModuleTacticalBase(object):
                 size,
             )
 
-        for i in tqdm(range(610, 650)):
-            # for i in tqdm(df.frame_num.unique()):
+        for i in tqdm(df.frame_num.unique()):
             image = im_src.copy()
 
             df_tmp_players = df_players.loc[(df_players["frame_num"] == i)][
@@ -271,11 +270,14 @@ class DataPreparator(object):
 
         df_track["median_bb_height"].fillna(
             df_track["bb_height"], inplace=True)
-        df_track["yc_smoothed"] = df_track["y0"] + \
+        df_track["yc_corrected"] = df_track["y0"] + \
             df_track["median_bb_height"]
         return df_track
 
     def ewm(self, df_track, alpha=0.4, adjust=False):
+        df_track["xc_smoothed"] = df_track["xc_"].ewm(alpha=alpha).mean()
+        df_track["yc_smoothed"] = df_track["yc_corrected"].ewm(
+            alpha=alpha).mean()
         return df_track
 
     def smooth_tracks(self, df_merged):
@@ -283,10 +285,11 @@ class DataPreparator(object):
                                     == np.NaN, :]]
         for track_id in df_merged["track_id"].dropna().unique():
             df_track = df_merged.loc[df_merged["track_id"]
-                                     == track_id, :]
+                                     == track_id, :].copy()
 
             df_track = self.correct_feet_occlusion(df_track)
             df_track = self.interpolate_missing_frames(df_track)
+            df_track = self.ewm(df_track)
 
             tracks_dfs.append(df_track)
 
@@ -294,7 +297,7 @@ class DataPreparator(object):
 
     def prepare_points_for_homography(self, df_merged, shape):
         # scaling the coordinates to 640x320 (this is due to the model output resolutions)
-        df_merged["xc"] = df_merged["xc_"] * 640 / shape[1]
+        df_merged["xc"] = df_merged["xc_smoothed"] * 640 / shape[1]
         df_merged["yc"] = df_merged["yc_smoothed"] * 320 / shape[0]
         assert (np.sum(pd.isnull(df_merged["yc"]))) == 0
         return df_merged
