@@ -238,70 +238,62 @@ class DataPreparator(object):
         df_merged["frame_num"] = pd.factorize(df_merged["file_name"])[0]
         df_merged["track_id"] = df_merged["track_id"].dropna().astype(
             "int", errors="ignore")
+
+        df_merged["xc_"] = (df_merged["x0"] + df_merged["x1"]) / 2
+        df_merged["yc_"] = df_merged["y1"]
+        df_merged["bb_height"] = df_merged["y1"] - df_merged["y0"]
+
         return self.subset_input(df_merged)
 
-    def interpolate_missing_frames(self, df_merged):
+    def interpolate_missing_frames(self, df_track):
+
+        category = df_track.iloc[0]["category"]
+        track_id = df_track.iloc[0]["track_id"]
+
+        min_frame = df_track["frame_num"].min()
+        max_frame = df_track["frame_num"].max()
+
+        for frame in range(min_frame, max_frame):
+            if df_track.loc[df_track["frame_num"] == frame, :].empty:
+                df_track = df_track.append(
+                    {"frame_num": frame, "track_id": track_id, "category": category}, ignore_index=True)
+
+        df_track = df_track.sort_values(
+            "frame_num", ignore_index=True)
+        df_track = df_track.interpolate()
+
+        return df_track
+
+    def correct_feet_occlusion(self, df_track, window_size: int = int(FPS_INPUT)):
+
+        df_track["median_bb_height"] = df_track["bb_height"].rolling(
+            window_size, min_periods=1).median()
+
+        df_track["median_bb_height"].fillna(
+            df_track["bb_height"], inplace=True)
+        df_track["yc_smoothed"] = df_track["y0"] + \
+            df_track["median_bb_height"]
+        return df_track
+
+    def ewm(self, df_track, alpha=0.4, adjust=False):
+        return df_track
+
+    def smooth_tracks(self, df_merged):
         tracks_dfs = [df_merged.loc[df_merged["track_id"]
                                     == np.NaN, :]]
         for track_id in df_merged["track_id"].dropna().unique():
             df_track = df_merged.loc[df_merged["track_id"]
                                      == track_id, :]
-            category = df_track.iloc[0]["category"]
-            min_frame = df_track["frame_num"].min()
-            max_frame = df_track["frame_num"].max()
-            for frame in range(min_frame, max_frame):
-                if df_track.loc[df_track["frame_num"] == frame, :].empty:
-                    df_track = df_track.append(
-                        {"frame_num": frame, "track_id": track_id, "category": category}, ignore_index=True)
 
-            # if(track_id == 9.0):
-            #     # print(df_track.xs((9.0, 627), level=('track_id', 'frame_num')))
-            #     print(df_track.loc[df_track["frame_num"] == 627])
+            df_track = self.correct_feet_occlusion(df_track)
+            df_track = self.interpolate_missing_frames(df_track)
 
-            df_track = df_track.sort_values(
-                "frame_num", ignore_index=True)
-            #     # print(df_track.xs((9.0, 627), level=('track_id', 'frame_num')))
-            #     print(df_track.loc[df_track["frame_num"] == 627])
-            df_track = df_track.interpolate()
-            # if(track_id == 9.0):
-            #     # print(df_track.xs((9.0, 627), level=('track_id', 'frame_num')))
-            #     print(df_track.loc[df_track["frame_num"] == 627])
             tracks_dfs.append(df_track)
-
-            if(track_id == 9.0):
-                df_track.to_csv('9.csv', na_rep='NULL')
-                # print(df_track.loc[df_track["frame_num"] == 627])
 
         return pd.concat(tracks_dfs, ignore_index=True, sort=False)
 
-    def correct_feet_occlusion(self, df_merged, window_size: int = int(FPS_INPUT)):
-        for track_id in df_merged["track_id"].dropna().unique():
-            df_track = df_merged.loc[df_merged["track_id"]
-                                     == track_id, :]
-
-            df_merged.loc[df_merged["track_id"]
-                          == track_id, "median_bb_height"] = df_track["bb_height"].rolling(
-                window_size, min_periods=1).median()
-            df_merged.loc[df_merged["track_id"]
-                          == track_id, "max_bb_height"] = df_track["bb_height"].rolling(
-                window_size, min_periods=1).median()
-
-        df_merged["median_bb_height"].fillna(
-            df_merged["bb_height"], inplace=True)
-        df_merged["max_bb_height"].fillna(
-            df_merged["bb_height"], inplace=True)
-        df_merged["yc_smoothed"] = df_merged["y0"] + \
-            df_merged["median_bb_height"]
-        return df_merged
-
     def prepare_points_for_homography(self, df_merged, shape):
-        df_merged["xc_"] = (df_merged["x0"] + df_merged["x1"]) / 2
-        df_merged["yc_"] = df_merged["y1"]
-        df_merged["bb_height"] = df_merged["y1"] - df_merged["y0"]
-
-        df_merged = self.correct_feet_occlusion(df_merged)
         # scaling the coordinates to 640x320 (this is due to the model output resolutions)
-        df_merged.to_csv('prepare.csv')
         df_merged["xc"] = df_merged["xc_"] * 640 / shape[1]
         df_merged["yc"] = df_merged["yc_smoothed"] * 320 / shape[0]
         assert (np.sum(pd.isnull(df_merged["yc"]))) == 0
@@ -344,10 +336,11 @@ class DataPreparator(object):
             :,
             [
                 "frame_num",
-                "x0",
-                "x1",
+                "xc_",
                 "y0",
                 "y1",
+                "yc_",
+                "bb_height",
                 "category",
                 "team",
                 "number",
@@ -394,14 +387,10 @@ preparator = DataPreparator()
 df_merged = preparator.initial_prep(df_det, df_hom)
 df_merged.to_csv("df_merged.csv")
 
+df_merged = preparator.smooth_tracks(df_merged)
 
-# coordinates, according to which the mapping onto the pitch plane will happen
-# first way of smoothing can be applied here:
-# try applying smoothing methods to (x0, y0, x1, y1)
 
 df_merged = preparator.prepare_points_for_homography(df_merged, VIDEO_SHAPE)
-df_merged = preparator.interpolate_missing_frames(df_merged)
-df_merged.to_csv("df_interpolated.csv")
 df_merged_hom = preparator.apply_homography(df_merged)
 df_merged_hom.to_csv("df_merged_hom.csv")
 df_tactical = preparator.subset_output(df_merged_hom)
