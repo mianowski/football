@@ -275,7 +275,7 @@ class DataPreparator(object):
             df_track["median_bb_height"]
         return df_track
 
-    def ewm(self, df_track, alpha=0.4, adjust=False):
+    def ewm(self, df_track, alpha=0.8, adjust=False):
         df_track["xc_smoothed"] = df_track["xc_"].ewm(alpha=alpha).mean()
         df_track["yc_smoothed"] = df_track["yc_corrected"].ewm(
             alpha=alpha).mean()
@@ -283,7 +283,7 @@ class DataPreparator(object):
 
     def add_speed(self, df_track):
         df_track["speed"] = FPS_INPUT*((df_track["xc_smoothed"].diff() * 640 / VIDEO_SHAPE[1]).pow(
-            2) + (df_track["xc_smoothed"].diff() * 320 / VIDEO_SHAPE[0]).pow(2)).pow(.5).fillna(0)
+            2) + (df_track["yc_smoothed"].diff() * 320 / VIDEO_SHAPE[0]).pow(2)).pow(.5).fillna(0)
         return df_track
 
     def smooth_tracks(self, df_merged):
